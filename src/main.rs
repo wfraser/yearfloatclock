@@ -20,17 +20,22 @@ fn is_leap_year(year: i32) -> bool {
     year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
 }
 
+fn day_fraction(year_frac: f64) -> f64 {
+    let year_part = year_frac - year_frac.floor();
+    year_part * if is_leap_year(year_frac as i32) { 366. } else { 365. }
+}
+
 fn main() {
-    // How long to sleep to make the 8th digit move?
-    let per_day = 24. * 60. * 60. / 1e8;
-    let sleep_leap = Duration::from_secs_f64(366. * per_day);
-    let sleep_non_leap = Duration::from_secs_f64(365. * per_day);
+    // Half the time to sleep to make the 6th digit of the day move.
+    let sleep_time = Duration::from_secs_f64(24. * 60. * 60. / 1e6 / 2.);
 
     loop {
         let now = Local::now();
-        print!("\r{:.8}", year_fraction(now));
+        let year = year_fraction(now);
+        let day = day_fraction(year);
+        print!("\r{:.08} {:.06}", year, day);
         stdout().flush().unwrap();
-        sleep(if is_leap_year(now.year()) { sleep_leap } else { sleep_non_leap });
+        sleep(sleep_time);
     }
 }
 
@@ -65,5 +70,27 @@ mod test {
         assert!(!is_leap_year(2005));
         assert!(!is_leap_year(2100));
         assert!(is_leap_year(2400));
+    }
+
+    #[test]
+    fn day_frac() {
+        let one_day = chrono::Duration::hours(24);
+        let mut time = Utc.ymd(2020, 1, 1).and_hms(0, 0, 0);
+        let d = |t| day_fraction(year_fraction(t));
+
+        assert!(0.0001 > d(time));
+        assert!(-0.0001 < d(time));
+
+        time = time + one_day;
+        assert!(1.0001 > d(time));
+        assert!(0.9999 < d(time));
+
+        time = time + (one_day * 42);
+        assert!(43.0001 > d(time));
+        assert!(42.9999 < d(time));
+
+        time = Utc.ymd(2020, 1, 1).and_hms(0, 0, 0) - chrono::Duration::seconds(1);
+        assert!(365. > d(time));
+        assert!(364.9999 < d(time));
     }
 }
