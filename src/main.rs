@@ -21,8 +21,7 @@ fn is_leap_year(year: i32) -> bool {
 }
 
 fn day_fraction(year_frac: f64) -> f64 {
-    let year_part = year_frac - year_frac.floor();
-    year_part * if is_leap_year(year_frac as i32) { 366. } else { 365. }
+    year_frac.fract() * if is_leap_year(year_frac as i32) { 366. } else { 365. }
 }
 
 fn main() {
