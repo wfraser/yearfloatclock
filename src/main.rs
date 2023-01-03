@@ -13,7 +13,7 @@ fn year_fraction<Tz: TimeZone>(time: DateTime<Tz>) -> f64 {
 
     let year_frac = since_soy / year_secs;
 
-    y as f64 + year_frac
+    f64::from(y) + year_frac
 }
 
 fn is_leap_year(year: i32) -> bool {
@@ -25,6 +25,21 @@ fn day_fraction(year_frac: f64) -> f64 {
 }
 
 fn main() {
+    let args = std::env::args().skip(1).collect::<Vec<_>>().join(" ").to_lowercase();
+    if !args.is_empty() {
+        match chrono_english::parse_date_string(&args, Local::now(), chrono_english::Dialect::Us) {
+            Ok(dt) => {
+                let year = year_fraction(dt);
+                let day = day_fraction(year);
+                println!("{dt}: {year:.08} {day:.06}");
+            }
+            Err(e) => {
+                eprintln!("invalid date/time \"{args}\": {e}");
+            }
+        }
+        return;
+    }
+
     // Half the time to sleep to make the 6th digit of the day move.
     let sleep_time = Duration::from_secs_f64(24. * 60. * 60. / 1e6 / 2.);
 
@@ -32,7 +47,7 @@ fn main() {
         let now = Local::now();
         let year = year_fraction(now);
         let day = day_fraction(year);
-        print!("\r{:.08} {:.06}", year, day);
+        print!("\r{year:.08} {day:.06}");
         stdout().flush().unwrap();
         sleep(sleep_time);
     }
@@ -91,5 +106,13 @@ mod test {
         time = Utc.ymd(2020, 1, 1).and_hms(0, 0, 0) - chrono::Duration::seconds(1);
         assert!(365. > d(time));
         assert!(364.9999 < d(time));
+
+        time = Utc.ymd(2020, 1, 1).and_hms(12, 0, 0);
+        assert!(0.4999 < d(time));
+        assert!(0.5001 > d(time));
+
+        time = Utc.ymd(2020, 5, 19).and_hms(12, 0, 0);
+        assert!(0.4999 < d(time).fract());
+        assert!(0.5001 > d(time).fract());
     }
 }
