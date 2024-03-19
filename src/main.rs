@@ -21,6 +21,9 @@ struct Clock {
 
 impl Clock {
     pub fn new() -> Self {
+        // The day is always the same length, so these values stay fixed.
+        // Ideally these could be consts like DAY_DURATION, but floating-point division isn't
+        // allowed in const rust.
         let (day_digits, day_sample_duration) = second_ish_precision(DAY_DURATION);
         Self {
             year: -1.,
@@ -35,6 +38,8 @@ impl Clock {
         }
     }
 
+    /// Recalculate cached internal variables for the given date+time. Needs to be called if the
+    /// date changed since the last time any other methods were called.
     fn recalculate(&mut self, now: OffsetDateTime) {
         let offset = now.offset();
 
@@ -52,6 +57,7 @@ impl Clock {
         let (year_digits, year_sample_duration) = second_ish_precision(self.year_duration);
         self.year_digits = year_digits;
 
+        // nyquist theorem: the required sample rate is 2x the highest frequency signal
         self.sample_delay = year_sample_duration.min(self.day_sample_duration) / 2.;
 
         /*
@@ -61,6 +67,7 @@ impl Clock {
          */
     }
 
+    /// The year and the fraction of the way through the year.
     pub fn year_float(&mut self, now: OffsetDateTime) -> f64 {
         let year = f64::from(now.year());
         if year != self.year {
@@ -69,6 +76,7 @@ impl Clock {
         year + (now - self.year_start) / self.year_duration
     }
 
+    /// The day of the year (0-based) and the fraction of the way through the day.
     pub fn day_float(&mut self, now: OffsetDateTime) -> f64 {
         let day = f64::from(now.ordinal() - 1);
         if day != self.day {
@@ -77,6 +85,7 @@ impl Clock {
         day + (now - self.day_start) / DAY_DURATION
     }
 
+    /// Format the year and day fractions into a string with the right number of digits.
     pub fn format(&mut self, now: OffsetDateTime) -> String {
         let year = self.year_float(now);
         let day = self.day_float(now);
@@ -85,11 +94,14 @@ impl Clock {
         format!("{year:.year_digits$} {day:.day_digits$}")
     }
 
+    /// How long to delay before taking another time sample?
     pub fn sample_delay(&self) -> std::time::Duration {
         std::time::Duration::new(0, self.sample_delay.subsec_nanoseconds() as u32)
     }
 }
 
+/// For a decimal number of a given duration, how many digits need to be shown for it to update
+/// faster than once per second, and how often does that last digit update exactly?
 fn second_ish_precision(mut duration: Duration) -> (usize, Duration) {
     let mut digits = 0;
     while duration > Duration::seconds(1) {
