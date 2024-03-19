@@ -1,118 +1,182 @@
-use chrono::prelude::*;
-use std::io::{stdout, Write};
-use std::thread::sleep;
-use std::time::Duration;
+use std::io::Write;
+use time::{Date, Duration, OffsetDateTime};
 
-fn year_fraction<Tz: TimeZone>(time: DateTime<Tz>) -> f64 {
-    let y = time.date().year();
-    let soy = time.timezone().ymd(y, 1, 1).and_hms(0, 0, 0);
-    let eoy = time.timezone().ymd(y+1, 1, 1).and_hms(0, 0, 0);
+// We're ignoring leap seconds.
+const DAY_DURATION: Duration = Duration::hours(24);
 
-    let year_secs = (eoy - soy.clone()).to_std().unwrap().as_secs_f64();
-    let since_soy = (time - soy).to_std().unwrap().as_secs_f64();
+struct Clock {
+    year: f64,
+    year_start: OffsetDateTime,
+    year_duration: Duration,
 
-    let year_frac = since_soy / year_secs;
+    day: f64,
+    day_start: OffsetDateTime,
 
-    f64::from(y) + year_frac
+    year_digits: usize,
+    day_digits: usize,
+    day_sample_duration: Duration,
+
+    sample_delay: Duration,
 }
 
-fn is_leap_year(year: i32) -> bool {
-    year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
+impl Clock {
+    pub fn new() -> Self {
+        // The day is always the same length, so these values stay fixed.
+        // Ideally these could be consts like DAY_DURATION, but floating-point division isn't
+        // allowed in const rust.
+        let (day_digits, day_sample_duration) = second_ish_precision(DAY_DURATION);
+        Self {
+            year: -1.,
+            year_start: OffsetDateTime::from_unix_timestamp(0).unwrap(),
+            year_duration: Duration::seconds(-1),
+            day: -1.,
+            day_start: OffsetDateTime::from_unix_timestamp(0).unwrap(),
+            year_digits: 0,
+            day_digits,
+            day_sample_duration,
+            sample_delay: Duration::seconds(-1),
+        }
+    }
+
+    /// Recalculate cached internal variables for the given date+time. Needs to be called if the
+    /// date changed since the last time any other methods were called.
+    fn recalculate(&mut self, now: OffsetDateTime) {
+        let offset = now.offset();
+
+        let year = now.year();
+        let year_start = Date::from_ordinal_date(year, 1).unwrap().with_hms(0, 0, 0).unwrap();
+        let year_end = Date::from_ordinal_date(year + 1, 1).unwrap().with_hms(0, 0, 0).unwrap();
+
+        self.year = f64::from(year);
+        self.year_duration = year_end - year_start;
+        self.year_start = year_start.assume_offset(offset);
+
+        self.day = f64::from(now.ordinal() - 1);
+        self.day_start = now.date().with_hms(0, 0, 0).unwrap().assume_offset(offset);
+
+        let (year_digits, year_sample_duration) = second_ish_precision(self.year_duration);
+        self.year_digits = year_digits;
+
+        // nyquist theorem: the required sample rate is 2x the highest frequency signal
+        self.sample_delay = year_sample_duration.min(self.day_sample_duration) / 2;
+
+        /*
+        println!("{year_digits} digit of year = {year_sample_duration} = {} Hz", year_sample_duration.as_seconds_f64().recip());
+        println!("{} digit of day = {} = {} Hz", self.day_digits, self.day_sample_duration, self.day_sample_duration.as_seconds_f64().recip());
+        println!("sampling at 1/{} = {} Hz", self.sample_delay, self.sample_delay.as_seconds_f64().recip());
+         */
+    }
+
+    /// The year and the fraction of the way through the year.
+    pub fn year_float(&mut self, now: OffsetDateTime) -> f64 {
+        let year = f64::from(now.year());
+        if year != self.year {
+            self.recalculate(now);
+        }
+        year + (now - self.year_start) / self.year_duration
+    }
+
+    /// The day of the year (0-based) and the fraction of the way through the day.
+    pub fn day_float(&mut self, now: OffsetDateTime) -> f64 {
+        let day = f64::from(now.ordinal() - 1);
+        if day != self.day || f64::from(now.year()) != self.year {
+            self.recalculate(now);
+        }
+        day + (now - self.day_start) / DAY_DURATION
+    }
+
+    /// Format the year and day fractions into a string with the right number of digits.
+    pub fn format(&mut self, now: OffsetDateTime) -> String {
+        let year = self.year_float(now);
+        let day = self.day_float(now);
+        let year_digits = self.year_digits;
+        let day_digits = self.day_digits;
+        format!("{year:.year_digits$} {day:.day_digits$}")
+    }
+
+    /// How long to delay before taking another time sample?
+    pub fn sample_delay(&self) -> std::time::Duration {
+        std::time::Duration::new(0, self.sample_delay.subsec_nanoseconds() as u32)
+    }
 }
 
-fn day_fraction(year_frac: f64) -> f64 {
-    year_frac.fract() * if is_leap_year(year_frac as i32) { 366. } else { 365. }
+/// For a decimal number of a given duration, how many digits need to be shown for it to update
+/// faster than once per second, and how often does that last digit update exactly?
+fn second_ish_precision(mut duration: Duration) -> (usize, Duration) {
+    let mut digits = 0;
+    while duration > Duration::seconds(1) {
+        duration /= 10;
+        digits += 1;
+    }
+    (digits, duration)
 }
 
 fn main() {
-    let args = std::env::args().skip(1).collect::<Vec<_>>().join(" ").to_lowercase();
-    if !args.is_empty() {
-        match chrono_english::parse_date_string(&args, Local::now(), chrono_english::Dialect::Us) {
-            Ok(dt) => {
-                let year = year_fraction(dt);
-                let day = day_fraction(year);
-                println!("{dt}: {year:.08} {day:.06}");
-            }
-            Err(e) => {
-                eprintln!("invalid date/time \"{args}\": {e}");
-            }
-        }
-        return;
-    }
-
-    // Half the time to sleep to make the 6th digit of the day move.
-    let sleep_time = Duration::from_secs_f64(24. * 60. * 60. / 1e6 / 2.);
-
+    let mut last = String::new();
+    let mut clock = Clock::new();
     loop {
-        let now = Local::now();
-        let year = year_fraction(now);
-        let day = day_fraction(year);
-        print!("\r{year:.08} {day:.06}");
-        stdout().flush().unwrap();
-        sleep(sleep_time);
+        let now = OffsetDateTime::now_local().unwrap();
+        let next = clock.format(now);
+        if next != last {
+            let space = last.len();
+            print!("\r{next:<space$}");
+            std::io::stdout().flush().unwrap();
+            last = next;
+        }
+        std::thread::sleep(clock.sample_delay());
     }
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
+    use time::Month;
     use super::*;
 
     #[test]
-    #[allow(clippy::float_cmp)]
     fn year_ends() {
-        let one_sec = chrono::Duration::seconds(1);
+        let mut clock = Clock::new();
 
-        let mut time = Utc.ymd(2020, 12, 31).and_hms(23, 59, 59);
-        assert!(2020.9999 < year_fraction(time));
-        assert!(2021.0000 > year_fraction(time));
+        let one_sec = Duration::seconds(1);
 
-        time = time + one_sec;
-        assert_eq!(2021., year_fraction(time));
+        let mut time = Date::from_calendar_date(2020, Month::December, 31).unwrap().with_hms(23, 59, 59).unwrap().assume_utc();
+        assert!(2020.9999 < clock.year_float(time));
+        assert!(2021.0000 > clock.year_float(time));
 
-        time = time + one_sec;
-        assert!(2021. < year_fraction(time));
-        assert!(2021.0001 > year_fraction(time));
-    }
+        time += one_sec;
+        assert_eq!(2021., clock.year_float(time));
 
-    #[test]
-    fn leap_year() {
-        assert!(is_leap_year(2000));
-        assert!(!is_leap_year(2001));
-        assert!(!is_leap_year(2002));
-        assert!(!is_leap_year(2003));
-        assert!(is_leap_year(2004));
-        assert!(!is_leap_year(2005));
-        assert!(!is_leap_year(2100));
-        assert!(is_leap_year(2400));
+        time += one_sec;
+        assert!(2021. < clock.year_float(time));
+        assert!(2021.0001 > clock.year_float(time));
     }
 
     #[test]
     fn day_frac() {
-        let one_day = chrono::Duration::hours(24);
-        let mut time = Utc.ymd(2020, 1, 1).and_hms(0, 0, 0);
-        let d = |t| day_fraction(year_fraction(t));
+        let mut clock = Clock::new();
+        let mut time = Date::from_calendar_date(2021, Month::January, 1).unwrap().with_hms(0, 0, 0).unwrap().assume_utc();
+        assert!(0.0001 > clock.day_float(time));
+        assert!(-0.0001 < clock.day_float(time));
 
-        assert!(0.0001 > d(time));
-        assert!(-0.0001 < d(time));
+        time += DAY_DURATION;
+        assert!(0.9999 < clock.day_float(time));
+        assert!(1.0001 > clock.day_float(time));
+    }
 
-        time = time + one_day;
-        assert!(1.0001 > d(time));
-        assert!(0.9999 < d(time));
+    #[test]
+    fn leap_year() {
+        let mut clock = Clock::new();
 
-        time = time + (one_day * 42);
-        assert!(43.0001 > d(time));
-        assert!(42.9999 < d(time));
+        // 2000 was a leap year
+        let mut time = Date::from_calendar_date(2000, Month::December, 31).unwrap().with_hms(23, 59, 59).unwrap().assume_utc();
+        assert!(2001. > clock.year_float(time));
+        let leap_delay = clock.sample_delay();
 
-        time = Utc.ymd(2020, 1, 1).and_hms(0, 0, 0) - chrono::Duration::seconds(1);
-        assert!(365. > d(time));
-        assert!(364.9999 < d(time));
+        // happy new year
+        time += Duration::seconds(1);
+        assert_eq!(2001., clock.year_float(time));
+        let non_leap_delay = clock.sample_delay();
 
-        time = Utc.ymd(2020, 1, 1).and_hms(12, 0, 0);
-        assert!(0.4999 < d(time));
-        assert!(0.5001 > d(time));
-
-        time = Utc.ymd(2020, 5, 19).and_hms(12, 0, 0);
-        assert!(0.4999 < d(time).fract());
-        assert!(0.5001 > d(time).fract());
+        // leap year is slightly longer, and should have a longer delay
+        assert!(leap_delay > non_leap_delay);
     }
 }
