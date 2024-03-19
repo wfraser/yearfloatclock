@@ -58,7 +58,7 @@ impl Clock {
         self.year_digits = year_digits;
 
         // nyquist theorem: the required sample rate is 2x the highest frequency signal
-        self.sample_delay = year_sample_duration.min(self.day_sample_duration) / 2.;
+        self.sample_delay = year_sample_duration.min(self.day_sample_duration) / 2;
 
         /*
         println!("{year_digits} digit of year = {year_sample_duration} = {} Hz", year_sample_duration.as_seconds_f64().recip());
@@ -79,7 +79,7 @@ impl Clock {
     /// The day of the year (0-based) and the fraction of the way through the day.
     pub fn day_float(&mut self, now: OffsetDateTime) -> f64 {
         let day = f64::from(now.ordinal() - 1);
-        if day != self.day {
+        if day != self.day || f64::from(now.year()) != self.year {
             self.recalculate(now);
         }
         day + (now - self.day_start) / DAY_DURATION
