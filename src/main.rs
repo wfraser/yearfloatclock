@@ -46,7 +46,7 @@ impl Clock {
         self.year_duration = year_end - year_start;
         self.year_start = year_start.assume_offset(offset);
 
-        self.day = f64::from(now.ordinal());
+        self.day = f64::from(now.ordinal() - 1);
         self.day_start = now.date().with_hms(0, 0, 0).unwrap().assume_offset(offset);
 
         let (year_digits, year_sample_duration) = second_ish_precision(self.year_duration);
@@ -68,7 +68,7 @@ impl Clock {
     }
 
     pub fn day_float(&mut self, now: OffsetDateTime) -> f64 {
-        let day = f64::from(now.ordinal());
+        let day = f64::from(now.ordinal() - 1);
         if day != self.day {
             self.recalculate(now);
         }
