@@ -1,25 +1,91 @@
 use std::io::Write;
 use time::{Date, Duration, OffsetDateTime};
 
-fn year_float(now: OffsetDateTime) -> (f64, Duration) {
-    let offset = now.offset();
+// We're ignoring leap seconds.
+const DAY_DURATION: Duration = Duration::hours(24);
 
-    let year = now.year();
-    let year_start = Date::from_ordinal_date(year, 1).unwrap().with_hms(0, 0, 0).unwrap();
-    let year_end = Date::from_ordinal_date(year + 1, 1).unwrap().with_hms(0, 0, 0).unwrap();
-    let year_duration = year_end - year_start;
+struct Clock {
+    year: f64,
+    year_start: OffsetDateTime,
+    year_duration: Duration,
 
-    (f64::from(year) + (now - year_start.assume_offset(offset)) / year_duration, year_duration)
+    day: f64,
+    day_start: OffsetDateTime,
+
+    year_digits: usize,
+    day_digits: usize,
+    day_sample_duration: Duration,
+
+    sample_delay: Duration,
 }
 
-fn day_float(now: OffsetDateTime) -> (f64, Duration) {
-    let offset = now.offset();
+impl Clock {
+    pub fn new() -> Self {
+        let (day_digits, day_sample_duration) = second_ish_precision(DAY_DURATION);
+        Self {
+            year: -1.,
+            year_start: OffsetDateTime::from_unix_timestamp(0).unwrap(),
+            year_duration: Duration::seconds(-1),
+            day: -1.,
+            day_start: OffsetDateTime::from_unix_timestamp(0).unwrap(),
+            year_digits: 0,
+            day_digits,
+            day_sample_duration,
+            sample_delay: Duration::seconds(-1),
+        }
+    }
 
-    let day_start = now.date().with_hms(0, 0, 0).unwrap();
-    let day_end = now.date().next_day().unwrap().with_hms(0, 0, 0).unwrap();
-    let day_duration = day_end - day_start;
+    fn recalculate(&mut self, now: OffsetDateTime) {
+        let offset = now.offset();
 
-    (f64::from(now.ordinal() - 1) + (now - day_start.assume_offset(offset)) / day_duration, day_duration)
+        let year = now.year();
+        let year_start = Date::from_ordinal_date(year, 1).unwrap().with_hms(0, 0, 0).unwrap();
+        let year_end = Date::from_ordinal_date(year + 1, 1).unwrap().with_hms(0, 0, 0).unwrap();
+
+        self.year = f64::from(year);
+        self.year_duration = year_end - year_start;
+        self.year_start = year_start.assume_offset(offset);
+
+        self.day = f64::from(now.ordinal());
+        self.day_start = now.date().with_hms(0, 0, 0).unwrap().assume_offset(offset);
+
+        let (year_digits, year_sample_duration) = second_ish_precision(self.year_duration);
+        self.year_digits = year_digits;
+
+        self.sample_delay = year_sample_duration.min(self.day_sample_duration) / 2.;
+
+        println!("{year_digits} digit of year = {year_sample_duration} = {} Hz", year_sample_duration.as_seconds_f64().recip());
+        println!("{} digit of day = {} = {} Hz", self.day_digits, self.day_sample_duration, self.day_sample_duration.as_seconds_f64().recip());
+        println!("sampling at 1/{} = {} Hz", self.sample_delay, self.sample_delay.as_seconds_f64().recip());
+    }
+
+    pub fn year_float(&mut self, now: OffsetDateTime) -> f64 {
+        let year = f64::from(now.year());
+        if year != self.year {
+            self.recalculate(now);
+        }
+        year + (now - self.year_start) / self.year_duration
+    }
+
+    pub fn day_float(&mut self, now: OffsetDateTime) -> f64 {
+        let day = f64::from(now.ordinal());
+        if day != self.day {
+            self.recalculate(now);
+        }
+        day + (now - self.day_start) / DAY_DURATION
+    }
+
+    pub fn format(&mut self, now: OffsetDateTime) -> String {
+        let year = self.year_float(now);
+        let day = self.day_float(now);
+        let year_digits = self.year_digits;
+        let day_digits = self.day_digits;
+        format!("{year:.year_digits$} {day:.day_digits$}")
+    }
+
+    pub fn sample_delay(&self) -> std::time::Duration {
+        std::time::Duration::new(0, self.sample_delay.subsec_nanoseconds() as u32)
+    }
 }
 
 fn second_ish_precision(mut duration: Duration) -> (usize, Duration) {
@@ -33,39 +99,15 @@ fn second_ish_precision(mut duration: Duration) -> (usize, Duration) {
 
 fn main() {
     let mut last = String::new();
-    let mut prev_year = -1.;
-    let mut prev_day = -1.;
-    let mut sample_dur = Duration::nanoseconds(-1);
-    let mut year_digits = 0;
-    let mut day_digits = 0;
+    let mut clock = Clock::new();
     loop {
         let now = OffsetDateTime::now_local().unwrap();
-        let (year, year_duration) = year_float(now);
-        let (day, day_duration) = day_float(now);
-
-        if year.trunc() - prev_year > 1. || day.trunc() - prev_day > 1. {
-            let year_sample_time: Duration;
-            let day_sample_time: Duration;
-            (year_digits, year_sample_time) = second_ish_precision(year_duration);
-            (day_digits, day_sample_time) = second_ish_precision(day_duration);
-            println!("{year_digits} digit of year = {year_sample_time} = {} Hz", year_sample_time.as_seconds_f64().recip());
-            println!("{day_digits} digit of day = {day_sample_time} = {} Hz", day_sample_time.as_seconds_f64().recip());
-            // nyquist theorem: need to sample at highest signal frequency x 2
-            sample_dur = year_sample_time.min(day_sample_time) / 2.;
-            println!("sampling at 1/{sample_dur} = {} Hz", sample_dur.as_seconds_f64().recip());
-        }
-
-        let next = format!("{year:.year_digits$} {day:.day_digits$}");
+        let next = clock.format(now);
         let space = last.len();
         print!("\r{next:<space$}");
         std::io::stdout().flush().unwrap();
 
         last = next;
-        prev_year = year.trunc();
-        prev_day = day.trunc();
-
-        std::thread::sleep(std::time::Duration::new(0, sample_dur.whole_nanoseconds() as u32));
+        std::thread::sleep(clock.sample_delay());
     }
-
-    //   (format!("{value:.digits$}"), duration)
 }
