@@ -54,9 +54,11 @@ impl Clock {
 
         self.sample_delay = year_sample_duration.min(self.day_sample_duration) / 2.;
 
+        /*
         println!("{year_digits} digit of year = {year_sample_duration} = {} Hz", year_sample_duration.as_seconds_f64().recip());
         println!("{} digit of day = {} = {} Hz", self.day_digits, self.day_sample_duration, self.day_sample_duration.as_seconds_f64().recip());
         println!("sampling at 1/{} = {} Hz", self.sample_delay, self.sample_delay.as_seconds_f64().recip());
+         */
     }
 
     pub fn year_float(&mut self, now: OffsetDateTime) -> f64 {
@@ -103,11 +105,12 @@ fn main() {
     loop {
         let now = OffsetDateTime::now_local().unwrap();
         let next = clock.format(now);
-        let space = last.len();
-        print!("\r{next:<space$}");
-        std::io::stdout().flush().unwrap();
-
-        last = next;
+        if next != last {
+            let space = last.len();
+            print!("\r{next:<space$}");
+            std::io::stdout().flush().unwrap();
+            last = next;
+        }
         std::thread::sleep(clock.sample_delay());
     }
 }
