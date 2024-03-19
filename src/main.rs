@@ -111,3 +111,57 @@ fn main() {
         std::thread::sleep(clock.sample_delay());
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use time::Month;
+    use super::*;
+
+    #[test]
+    fn year_ends() {
+        let mut clock = Clock::new();
+
+        let one_sec = Duration::seconds(1);
+
+        let mut time = Date::from_calendar_date(2020, Month::December, 31).unwrap().with_hms(23, 59, 59).unwrap().assume_utc();
+        assert!(2020.9999 < clock.year_float(time));
+        assert!(2021.0000 > clock.year_float(time));
+
+        time += one_sec;
+        assert_eq!(2021., clock.year_float(time));
+
+        time += one_sec;
+        assert!(2021. < clock.year_float(time));
+        assert!(2021.0001 > clock.year_float(time));
+    }
+
+    #[test]
+    fn day_frac() {
+        let mut clock = Clock::new();
+        let mut time = Date::from_calendar_date(2021, Month::January, 1).unwrap().with_hms(0, 0, 0).unwrap().assume_utc();
+        assert!(0.0001 > clock.day_float(time));
+        assert!(-0.0001 < clock.day_float(time));
+
+        time += DAY_DURATION;
+        assert!(0.9999 < clock.day_float(time));
+        assert!(1.0001 > clock.day_float(time));
+    }
+
+    #[test]
+    fn leap_year() {
+        let mut clock = Clock::new();
+
+        // 2000 was a leap year
+        let mut time = Date::from_calendar_date(2000, Month::December, 31).unwrap().with_hms(23, 59, 59).unwrap().assume_utc();
+        assert!(2001. > clock.year_float(time));
+        let leap_delay = clock.sample_delay();
+
+        // happy new year
+        time += Duration::seconds(1);
+        assert_eq!(2001., clock.year_float(time));
+        let non_leap_delay = clock.sample_delay();
+
+        // leap year is slightly longer, and should have a longer delay
+        assert!(leap_delay > non_leap_delay);
+    }
+}
