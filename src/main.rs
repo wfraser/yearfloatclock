@@ -44,8 +44,14 @@ impl Clock {
         let offset = now.offset();
 
         let year = now.year();
-        let year_start = Date::from_ordinal_date(year, 1).unwrap().with_hms(0, 0, 0).unwrap();
-        let year_end = Date::from_ordinal_date(year + 1, 1).unwrap().with_hms(0, 0, 0).unwrap();
+        let year_start = Date::from_ordinal_date(year, 1)
+            .unwrap()
+            .with_hms(0, 0, 0)
+            .unwrap();
+        let year_end = Date::from_ordinal_date(year + 1, 1)
+            .unwrap()
+            .with_hms(0, 0, 0)
+            .unwrap();
 
         self.year = f64::from(year);
         self.year_duration = year_end - year_start;
@@ -129,8 +135,8 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use time::Month;
     use super::*;
+    use time::Month;
 
     #[test]
     fn year_ends() {
@@ -138,7 +144,11 @@ mod tests {
 
         let one_sec = Duration::seconds(1);
 
-        let mut time = Date::from_calendar_date(2020, Month::December, 31).unwrap().with_hms(23, 59, 59).unwrap().assume_utc();
+        let mut time = Date::from_calendar_date(2020, Month::December, 31)
+            .unwrap()
+            .with_hms(23, 59, 59)
+            .unwrap()
+            .assume_utc();
         assert!(2020.9999 < clock.year_float(time));
         assert!(2021.0000 > clock.year_float(time));
 
@@ -153,7 +163,11 @@ mod tests {
     #[test]
     fn day_frac() {
         let mut clock = Clock::new();
-        let mut time = Date::from_calendar_date(2021, Month::January, 1).unwrap().with_hms(0, 0, 0).unwrap().assume_utc();
+        let mut time = Date::from_calendar_date(2021, Month::January, 1)
+            .unwrap()
+            .with_hms(0, 0, 0)
+            .unwrap()
+            .assume_utc();
         assert!(0.0001 > clock.day_float(time));
         assert!(-0.0001 < clock.day_float(time));
 
@@ -167,7 +181,11 @@ mod tests {
         let mut clock = Clock::new();
 
         // 2000 was a leap year
-        let mut time = Date::from_calendar_date(2000, Month::December, 31).unwrap().with_hms(23, 59, 59).unwrap().assume_utc();
+        let mut time = Date::from_calendar_date(2000, Month::December, 31)
+            .unwrap()
+            .with_hms(23, 59, 59)
+            .unwrap()
+            .assume_utc();
         assert!(2001. > clock.year_float(time));
         let leap_delay = clock.sample_delay();
 
