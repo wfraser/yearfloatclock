@@ -1,10 +1,13 @@
 use std::io::Write;
-use time::{Date, Duration, OffsetDateTime};
+use time::format_description::well_known::Iso8601;
+use time::{Date, Duration, OffsetDateTime, UtcOffset};
 
 // We're ignoring leap seconds.
 const DAY_DURATION: Duration = Duration::hours(24);
 
 struct Clock {
+    basis: f64,
+
     year: f64,
     year_start: OffsetDateTime,
     year_duration: Duration,
@@ -26,6 +29,7 @@ impl Clock {
         // allowed in const rust.
         let (day_digits, day_sample_duration) = second_ish_precision(DAY_DURATION);
         Self {
+            basis: 0.,
             year: -1.,
             year_start: OffsetDateTime::from_unix_timestamp(0).unwrap(),
             year_duration: Duration::seconds(-1),
@@ -79,7 +83,7 @@ impl Clock {
         if year != self.year {
             self.recalculate(now);
         }
-        year + (now - self.year_start) / self.year_duration
+        year + (now - self.year_start) / self.year_duration - self.basis
     }
 
     /// The day of the year (0-based) and the fraction of the way through the day.
@@ -104,6 +108,11 @@ impl Clock {
     pub fn sample_delay(&self) -> std::time::Duration {
         std::time::Duration::new(0, self.sample_delay.subsec_nanoseconds() as u32)
     }
+
+    pub fn set_basis(&mut self, time: OffsetDateTime) {
+        let f = self.year_float(time);
+        self.basis = f;
+    }
 }
 
 /// For a decimal number of a given duration, how many digits need to be shown for it to update
@@ -117,9 +126,50 @@ fn second_ish_precision(mut duration: Duration) -> (usize, Duration) {
     (digits, duration)
 }
 
+fn basis_from_args(mut args: impl Iterator<Item = String>) -> Option<OffsetDateTime> {
+    match args.next().as_deref() {
+        Some("--basis") => (),
+        Some("--version") | Some("-V") => {
+            eprintln!(
+                "{} v{} {}",
+                env!("CARGO_PKG_NAME"),
+                env!("CARGO_PKG_VERSION"),
+                env!("CARGO_PKG_AUTHORS")
+            );
+            std::process::exit(1);
+        }
+        None => return None,
+        Some(other) => {
+            if !matches!(other, "--help" | "-h") {
+                eprintln!("unrecognized argument {other:?}");
+            }
+            eprintln!("usage: {} [--basis yyyy-mm-dd]", env!("CARGO_PKG_NAME"));
+            std::process::exit(1);
+        }
+    };
+    let time = match args.next().map(|s| Date::parse(&s, &Iso8601::DATE)) {
+        Some(Ok(d)) => d
+            .with_hms(0, 0, 0)
+            .unwrap()
+            .assume_offset(UtcOffset::current_local_offset().unwrap()),
+        Some(Err(e)) => {
+            eprintln!("invalid basis date: {e}");
+            std::process::exit(2);
+        }
+        None => {
+            eprintln!("--basis flag must be followed by a date in YYYY-MM-DD format");
+            std::process::exit(2);
+        }
+    };
+    Some(time)
+}
+
 fn main() {
     let mut last = String::new();
     let mut clock = Clock::new();
+    if let Some(basis) = basis_from_args(std::env::args().skip(1)) {
+        clock.set_basis(basis);
+    }
     loop {
         let now = OffsetDateTime::now_local().unwrap();
         let next = clock.format(now);
