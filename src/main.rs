@@ -6,7 +6,8 @@ use time::{Date, Duration, OffsetDateTime, UtcOffset};
 const DAY_DURATION: Duration = Duration::hours(24);
 
 struct Clock {
-    basis: f64,
+    basis_year: f64,
+    basis_day: f64,
 
     year: f64,
     year_start: OffsetDateTime,
@@ -29,7 +30,8 @@ impl Clock {
         // allowed in const rust.
         let (day_digits, day_sample_duration) = second_ish_precision(DAY_DURATION);
         Self {
-            basis: 0.,
+            basis_year: 0.,
+            basis_day: 0.,
             year: -1.,
             year_start: OffsetDateTime::from_unix_timestamp(0).unwrap(),
             year_duration: Duration::seconds(-1),
@@ -83,7 +85,7 @@ impl Clock {
         if year != self.year {
             self.recalculate(now);
         }
-        year + (now - self.year_start) / self.year_duration - self.basis
+        year + (now - self.year_start) / self.year_duration - self.basis_year
     }
 
     /// The day of the year (0-based) and the fraction of the way through the day.
@@ -92,7 +94,12 @@ impl Clock {
         if day != self.day || f64::from(now.year()) != self.year {
             self.recalculate(now);
         }
-        day + (now - self.day_start) / DAY_DURATION
+        let f = day + (now - self.day_start) / DAY_DURATION;
+        if f > self.basis_day {
+            f - self.basis_day
+        } else {
+            f - self.basis_day + (self.year_duration / DAY_DURATION)
+        }
     }
 
     /// Format the year and day fractions into a string with the right number of digits.
@@ -110,8 +117,8 @@ impl Clock {
     }
 
     pub fn set_basis(&mut self, time: OffsetDateTime) {
-        let f = self.year_float(time);
-        self.basis = f;
+        self.basis_year = self.year_float(time);
+        self.basis_day = self.day_float(time);
     }
 }
 
