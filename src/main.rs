@@ -1,6 +1,6 @@
 use std::io::Write;
 use time::format_description::well_known::Iso8601;
-use time::{Date, Duration, OffsetDateTime, UtcOffset};
+use time::{Date, Duration, OffsetDateTime, PrimitiveDateTime, UtcOffset};
 
 // We're ignoring leap seconds.
 const DAY_DURATION: Duration = Duration::hours(24);
@@ -160,18 +160,21 @@ impl Args {
                         "--basis" => &mut ret.basis,
                         _ => unreachable!(),
                     };
-                    let time = match args.next().map(|s| Date::parse(&s, &Iso8601::DATE)) {
-                        Some(Ok(d)) => d
-                            .with_hms(0, 0, 0)
-                            .unwrap()
-                            .assume_offset(UtcOffset::current_local_offset().unwrap()),
-                        Some(Err(e)) => {
-                            eprintln!("invalid basis date: {e}");
+                    let time = {
+                        let bail = || -> ! {
+                            eprintln!("{arg} must be followed by a date/time in YYYY-MM-DD[THH:MM:SS[+ZZZZ]] format");
                             std::process::exit(2);
-                        }
-                        None => {
-                            eprintln!("--basis flag must be followed by a date in YYYY-MM-DD format");
-                            std::process::exit(2);
+                        };
+                        let input = args.next().unwrap_or_else(|| bail());
+                        if let Ok(dt) = OffsetDateTime::parse(&input, &Iso8601::DATE_TIME_OFFSET) {
+                            dt
+                        } else if let Ok(dt) = PrimitiveDateTime::parse(&input, &Iso8601::DATE_TIME) {
+                            dt.assume_offset(UtcOffset::current_local_offset().unwrap())
+                        } else if let Ok(d) = Date::parse(&input, &Iso8601::DATE) {
+                            d.with_hms(0, 0, 0)
+                                .unwrap().assume_offset(UtcOffset::current_local_offset().unwrap())
+                        } else {
+                            bail()
                         }
                     };
                     *dest = Some(time);
