@@ -183,7 +183,7 @@ impl Args {
                     if other != "-h" && other != "--help" {
                         eprintln!("unrecognized argument {other:?}");
                     }
-                    eprintln!("usage: {} [--basis yyyy-mm-dd]", env!("CARGO_PKG_NAME"));
+                    eprintln!("usage: {} [--basis datetime] [--at datetime]", env!("CARGO_PKG_NAME"));
                     std::process::exit(1);
                 }
             }
