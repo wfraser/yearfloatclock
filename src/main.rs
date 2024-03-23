@@ -133,49 +133,72 @@ fn second_ish_precision(mut duration: Duration) -> (usize, Duration) {
     (digits, duration)
 }
 
-fn basis_from_args(mut args: impl Iterator<Item = String>) -> Option<OffsetDateTime> {
-    match args.next().as_deref() {
-        Some("--basis") => (),
-        Some("--version") | Some("-V") => {
-            eprintln!(
-                "{} v{} {}",
-                env!("CARGO_PKG_NAME"),
-                env!("CARGO_PKG_VERSION"),
-                env!("CARGO_PKG_AUTHORS")
-            );
-            std::process::exit(1);
-        }
-        None => return None,
-        Some(other) => {
-            if !matches!(other, "--help" | "-h") {
-                eprintln!("unrecognized argument {other:?}");
+#[derive(Debug, Default)]
+struct Args {
+    basis: Option<OffsetDateTime>,
+    at: Option<OffsetDateTime>,
+}
+
+impl Args {
+    pub fn parse() -> Self {
+        let mut ret = Self::default();
+        let mut args = std::env::args().skip(1);
+        while let Some(arg) = args.next() {
+            match arg.as_str() {
+                "--version" | "-V" => {
+                    eprintln!(
+                        "{} v{} {}",
+                        env!("CARGO_PKG_NAME"),
+                        env!("CARGO_PKG_VERSION"),
+                        env!("CARGO_PKG_AUTHORS")
+                    );
+                    std::process::exit(1);
+                }
+                "--at" | "--basis" => {
+                    let dest = match arg.as_str() {
+                        "--at" => &mut ret.at,
+                        "--basis" => &mut ret.basis,
+                        _ => unreachable!(),
+                    };
+                    let time = match args.next().map(|s| Date::parse(&s, &Iso8601::DATE)) {
+                        Some(Ok(d)) => d
+                            .with_hms(0, 0, 0)
+                            .unwrap()
+                            .assume_offset(UtcOffset::current_local_offset().unwrap()),
+                        Some(Err(e)) => {
+                            eprintln!("invalid basis date: {e}");
+                            std::process::exit(2);
+                        }
+                        None => {
+                            eprintln!("--basis flag must be followed by a date in YYYY-MM-DD format");
+                            std::process::exit(2);
+                        }
+                    };
+                    *dest = Some(time);
+                }
+                other => {
+                    if other != "-h" && other != "--help" {
+                        eprintln!("unrecognized argument {other:?}");
+                    }
+                    eprintln!("usage: {} [--basis yyyy-mm-dd]", env!("CARGO_PKG_NAME"));
+                    std::process::exit(1);
+                }
             }
-            eprintln!("usage: {} [--basis yyyy-mm-dd]", env!("CARGO_PKG_NAME"));
-            std::process::exit(1);
         }
-    };
-    let time = match args.next().map(|s| Date::parse(&s, &Iso8601::DATE)) {
-        Some(Ok(d)) => d
-            .with_hms(0, 0, 0)
-            .unwrap()
-            .assume_offset(UtcOffset::current_local_offset().unwrap()),
-        Some(Err(e)) => {
-            eprintln!("invalid basis date: {e}");
-            std::process::exit(2);
-        }
-        None => {
-            eprintln!("--basis flag must be followed by a date in YYYY-MM-DD format");
-            std::process::exit(2);
-        }
-    };
-    Some(time)
+        ret
+    }
 }
 
 fn main() {
     let mut last = String::new();
     let mut clock = Clock::new();
-    if let Some(basis) = basis_from_args(std::env::args().skip(1)) {
+    let args = Args::parse();
+    if let Some(basis) = args.basis {
         clock.set_basis(basis);
+    }
+    if let Some(t) = args.at {
+        println!("{}", clock.format(t));
+        return;
     }
     loop {
         let now = OffsetDateTime::now_local().unwrap();
