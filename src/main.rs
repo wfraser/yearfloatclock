@@ -95,7 +95,7 @@ impl Clock {
             self.recalculate(now);
         }
         let f = day + (now - self.day_start) / DAY_DURATION;
-        if f > self.basis_day {
+        if f >= self.basis_day {
             f - self.basis_day
         } else {
             f - self.basis_day + (self.year_duration / DAY_DURATION)
