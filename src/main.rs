@@ -8,6 +8,7 @@ const DAY_DURATION: Duration = Duration::hours(24);
 struct Clock {
     basis_year: f64,
     basis_day: f64,
+    basis_tz: Option<time::UtcOffset>,
 
     year: f64,
     year_start: OffsetDateTime,
@@ -32,6 +33,7 @@ impl Clock {
         Self {
             basis_year: 0.,
             basis_day: 0.,
+            basis_tz: None,
             year: -1.,
             year_start: OffsetDateTime::from_unix_timestamp(0).unwrap(),
             year_duration: Duration::seconds(-1),
@@ -47,7 +49,7 @@ impl Clock {
     /// Recalculate cached internal variables for the given date+time. Needs to be called if the
     /// date changed since the last time any other methods were called.
     fn recalculate(&mut self, now: OffsetDateTime) {
-        let offset = now.offset();
+        let offset = self.basis_tz.unwrap_or(now.offset());
 
         let year = now.year();
         let year_start = Date::from_ordinal_date(year, 1)
@@ -119,6 +121,7 @@ impl Clock {
     pub fn set_basis(&mut self, time: OffsetDateTime) {
         self.basis_year = self.year_float(time);
         self.basis_day = self.day_float(time);
+        self.basis_tz = Some(time.offset());
     }
 }
 
@@ -166,13 +169,14 @@ impl Args {
                             std::process::exit(2);
                         };
                         let input = args.next().unwrap_or_else(|| bail());
-                        if let Ok(dt) = OffsetDateTime::parse(&input, &Iso8601::DATE_TIME_OFFSET) {
+                        if let Ok(dt) = OffsetDateTime::parse(&input, &Iso8601::PARSING) {
                             dt
-                        } else if let Ok(dt) = PrimitiveDateTime::parse(&input, &Iso8601::DATE_TIME) {
+                        } else if let Ok(dt) = PrimitiveDateTime::parse(&input, &Iso8601::PARSING) {
                             dt.assume_offset(UtcOffset::current_local_offset().unwrap())
-                        } else if let Ok(d) = Date::parse(&input, &Iso8601::DATE) {
+                        } else if let Ok(d) = Date::parse(&input, &Iso8601::PARSING) {
                             d.with_hms(0, 0, 0)
-                                .unwrap().assume_offset(UtcOffset::current_local_offset().unwrap())
+                                .unwrap()
+                                .assume_offset(UtcOffset::current_local_offset().unwrap())
                         } else {
                             bail()
                         }
