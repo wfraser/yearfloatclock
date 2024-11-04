@@ -157,10 +157,10 @@ impl Args {
                     );
                     std::process::exit(1);
                 }
-                "--at" | "--basis" => {
+                "--at" | "--basis" | "--since" => {
                     let dest = match arg.as_str() {
                         "--at" => &mut ret.at,
-                        "--basis" => &mut ret.basis,
+                        "--basis" | "--since" => &mut ret.basis,
                         _ => unreachable!(),
                     };
                     let time = {
@@ -187,7 +187,7 @@ impl Args {
                     if other != "-h" && other != "--help" {
                         eprintln!("unrecognized argument {other:?}");
                     }
-                    eprintln!("usage: {} [--basis datetime] [--at datetime]", env!("CARGO_PKG_NAME"));
+                    eprintln!("usage: {} [--since datetime] [--at datetime]", env!("CARGO_PKG_NAME"));
                     std::process::exit(1);
                 }
             }
